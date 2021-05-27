@@ -40,7 +40,8 @@ namespace TooBigToFailBurgerShop.Application.Commands.Order
                 Message = new
                 {
                     OrderDate = DateTime.UtcNow,
-                    OrderId = Guid.NewGuid(),
+                    OrderId = request.OrderId,
+                    CustomerId = request.CustomerId,
                     CorrelationId = correlationId
                 },
 

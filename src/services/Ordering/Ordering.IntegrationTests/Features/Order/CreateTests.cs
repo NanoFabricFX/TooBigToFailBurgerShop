@@ -1,59 +1,113 @@
-﻿using JohnKnoop.MongoRepository;
-using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Extensions.Configuration;
-using MongoDB.Driver;
-using MongoDB.Driver.Core.Configuration;
+﻿using MongoDB.Driver;
 using System;
-using System.IO;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Threading.Tasks;
-using TooBigToFailBurgerShop;
-using TooBigToFailBurgerShop.Ordering.Application.Queries.Models;
 using TooBigToFailBurgerShop.Ordering.Persistence.Mongo;
 using Xunit;
 using Xunit.Abstractions;
+using Shouldly;
+using System.Net;
 
 namespace Ordering.IntegrationTests.Features.Order
 {
 
     public class OrderApiTests : IClassFixture<OrderWebApplicationFactory>
     {
-        private readonly IConfiguration _configuration;
-        private readonly HttpClient _client;
+        private const string CustomerIdHeaderName = "jwt-extracted-sub";
+        private const string RequestIdHeaderName = "x-request-id";
 
-        public static IConfiguration GetConfiguration()
-        {
-            var builder = new ConfigurationBuilder()
-                .SetBasePath(Directory.GetCurrentDirectory())
-                .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
-                .AddEnvironmentVariables();
-
-            return builder.Build();
-        }
+        private readonly OrderWebApplicationFactory _factory;
 
         public OrderApiTests(OrderWebApplicationFactory factory, ITestOutputHelper outputHelper)
         {
-            _configuration = GetConfiguration();
-
-            factory.OutputHelper = outputHelper;
-            _client = factory.CreateClient();
+            _factory = factory;
+            _factory.OutputHelper = outputHelper;
         }
 
+
+        public class Order
+        {
+            public Guid OrderId { get; set; }
+        }
+
+        [Fact]
+        public async Task Should_Return_Validation_Message_When_Missing_CustomerId()
+        {
+            // Given
+            var url = "/api/orders";
+            var orderContent = JsonContent.Create(new { });
+            var client = CreateClientWithMissingCustomerId();
+
+            // When
+            var resp = await client.PutAsync(url, orderContent);
+
+            // Then
+            resp.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        }
+
+        [Fact]
+        public async Task Should_Return_Validation_Message_When_Invalid_Format_CustomerId()
+        {
+            // Given
+            var url = "/api/orders";
+            var orderContent = JsonContent.Create(new { });
+            var client = CreateClientWithInvalidCustomerId();
+
+            // When
+            var resp = await client.PutAsync(url, orderContent);
+
+            // Then
+            resp.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        }
+
+        [Fact]
+        public async Task Should_Return_Validation_Message_When_Missing_RequestId()
+        {
+            // Given
+            var url = "/api/orders";
+            var orderContent = JsonContent.Create(new { });
+            var client = CreateClientWithMissingRequestId();
+
+            // When
+            var resp = await client.PutAsync(url, orderContent);
+
+            // Then
+            resp.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        }
+
+        [Fact]
+        public async Task Should_Return_Validation_Message_When_Invalid_Format_RequestId()
+        {
+            // Given
+            var url = "/api/orders";
+            var orderContent = JsonContent.Create(new { });
+            var client = CreateClientWithInvalidRequestId();
+
+            // When
+            var resp = await client.PutAsync(url, orderContent);
+
+            // Then
+            resp.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        }
         [Fact]
         public async Task Should_create_new_order()
         {
 
             // Given
-            var url = "Orders/createorder";
+            var url = "/api/orders";
             var orderContent = JsonContent.Create(new { });
+            var client = CreateClientWithValidHeaders();
 
             // When
-            _client.DefaultRequestHeaders.Add("x-requestid", "3fa85f64-5717-4562-b3fc-2c963f66afa6");
-            var resp = await _client.PutAsync(url, orderContent);
+            var resp = await client.PutAsync(url, orderContent);
 
             // Then
             resp.EnsureSuccessStatusCode();
+
+            var content = await resp.Content.ReadFromJsonAsync<Order>();
+            var orderId = content.OrderId;
+            orderId.ShouldNotBe(default);
 
         }
 
@@ -61,35 +115,14 @@ namespace Ordering.IntegrationTests.Features.Order
         public async Task Should_get_order_by_id()
         {
             // Given
-            var options = _configuration
-                           .GetSection(typeof(OrderIdRepositorySettings).Name)
-                           .Get<OrderIdRepositorySettings>()
-                           .Connection;
-
-            var mongoClientSettings = new MongoClientSettings
-            {
-                Credential = MongoCredential.CreateCredential(options.Database, options.Username, options.Password),
-                Server = new MongoServerAddress(options.Host, (int)options.Port),
-                Scheme = ConnectionStringScheme.MongoDB
-            };
-
-            IMongoClient mongoClient = new MongoClient(mongoClientSettings);
-
-            MongoRepository.Configure()
-                .Database(options.Database, db => db
-                    .MapAlongWithSubclassesInSameAssebmly<OrderId>(options.CollectionName)
-                    .MapAlongWithSubclassesInSameAssebmly<OrderArchiveItem>())
-                .AutoEnlistWithTransactionScopes()
-                .Build();
-
-            var repo = new OrdersArchiveItemRepository(mongoClient);
-            var id = Guid.NewGuid();
-            await repo.CreateAsync(id, DateTime.UtcNow);
+            var client = CreateClientWithValidHeaders(); ;
+            OrdersArchiveItemRepository repo = CreateOrderIdRepository();
+            var orderId = Guid.NewGuid();
+            await repo.CreateAsync(orderId, DateTime.UtcNow);
 
             // When
-            var getOrderByIdUrl = "Orders/getorder?id=" + id;
-            _client.DefaultRequestHeaders.Add("x-requestid", "3fa85f64-5717-4562-b3fc-2c963f66afa6");
-            var resp = await _client.GetAsync(getOrderByIdUrl);
+            var getOrderByIdUrl = $"api/orders/{orderId}";
+            var resp = await client.GetAsync(getOrderByIdUrl);
 
             // Then
             resp.EnsureSuccessStatusCode();
@@ -99,14 +132,65 @@ namespace Ordering.IntegrationTests.Features.Order
         public async Task Should_get_all_orders()
         {
             // Given
-            var url = "/Orders/getorders";
+            var url = "/api/orders";
+            var client = CreateClientWithValidHeaders(); ;
 
             // When
-            _client.DefaultRequestHeaders.Add("x-requestid", "3fa85f64-5717-4562-b3fc-2c963f66afa6");
-            var resp = await _client.GetAsync(url);
+            var resp = await client.GetAsync(url);
 
             // Then
             resp.EnsureSuccessStatusCode();
+        }
+
+        private OrdersArchiveItemRepository CreateOrderIdRepository()
+        {
+            IMongoClient mongoClient = (IMongoClient)_factory.Services.GetService(typeof(IMongoClient));
+            var repo = new OrdersArchiveItemRepository(mongoClient);
+            return repo;
+        }
+
+        private HttpClient CreateClientWithMissingCustomerId()
+        {
+            var client = _factory.CreateClient();
+            client.DefaultRequestHeaders.Add(RequestIdHeaderName, "3fa85f64-5717-4562-b3fc-2c963f66afa6");
+
+            return client;
+        }
+
+        private HttpClient CreateClientWithInvalidCustomerId()
+        { 
+        
+            var client = _factory.CreateClient();
+            client.DefaultRequestHeaders.Add(RequestIdHeaderName, "3fa85f64-5717-4562-b3fc-2c963f66afa6");
+            client.DefaultRequestHeaders.Add(CustomerIdHeaderName, "invalid");
+
+            return client;
+        }
+
+        private HttpClient CreateClientWithMissingRequestId()
+        {
+            var client = _factory.CreateClient();
+            client.DefaultRequestHeaders.Add(CustomerIdHeaderName, "90e25abf-b5a3-4899-af34-12bf97d6ce35");
+
+            return client;
+        }
+
+        private HttpClient CreateClientWithInvalidRequestId()
+        {
+            var client = _factory.CreateClient();
+            client.DefaultRequestHeaders.Add(CustomerIdHeaderName, "90e25abf-b5a3-4899-af34-12bf97d6ce35");
+            client.DefaultRequestHeaders.Add(RequestIdHeaderName, "invalid");
+
+            return client;
+        }
+
+        private HttpClient CreateClientWithValidHeaders()
+        {
+            var client = _factory.CreateClient();
+            client.DefaultRequestHeaders.Add(CustomerIdHeaderName, "90e25abf-b5a3-4899-af34-12bf97d6ce35");
+            client.DefaultRequestHeaders.Add(RequestIdHeaderName, "3fa85f64-5717-4562-b3fc-2c963f66afa6");
+
+            return client;
         }
     }
 }

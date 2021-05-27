@@ -25,9 +25,9 @@
 ### Links
 
 **Application**
-* [Shop frontend](https://localhost:16968/)
-* [Orders API](http://localhost:16969/swagger/index.html)
-* [Basket API](http://localhost:16970/swagger/index.html)
+* [Shop frontend](http://localhost:16968/)
+* [Orders API](http://localhost:10000/api/orders)
+* [Basket API](http://localhost:10000/api/basket)
  
 **Tracing**
 * [Jaeger](http://localhost:16686/)
@@ -43,5 +43,24 @@
 * [RabbitMQ management UI](http://localhost:15672)
 
 **Dapr**
-
 * [Dashboard](http://localhost:8034)
+
+**Swagger**
+* [Orders API](http://localhost:16969/swagger/index.html)
+* [Basket API](http://localhost:16970/swagger/index.html)
+
+### Running tests
+
+Start the application using docker-compose and run tests. 
+
+```
+cd src
+```
+
+```
+docker network create burgers.network && docker-compose -f docker-compose.yml -f docker-compose.override.yml up
+```
+
+```
+dotnet test /p:CollectCoverage=true TooBigToFailBurgerShop.sln
+```
